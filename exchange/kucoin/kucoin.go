@@ -16,20 +16,22 @@ import (
 	"time"
 )
 
-var sideMap = map[bool]string{true: "buy", false: "sell"}
-
 type Kucoin struct {
-	con   string
-	token string
-	api   exchange.Api
-	conns []*websocket.Conn
+	con    string
+	token  string
+	host   string
+	wsHost string
+	api    exchange.Api
+	conns  []*websocket.Conn
 }
 
 func New(con string, api exchange.Api) exchange.IExchange {
 	return &Kucoin{
-		con:   strings.ToUpper(strings.ReplaceAll(con, ".", "-")),
-		token: strings.ToUpper(strings.Split(con, ".")[0]),
-		api:   api,
+		host:   "https://api.kucoin.com",
+		wsHost: "wss://ws-api.kucoin.com/endpoint",
+		con:    strings.ToUpper(strings.ReplaceAll(con, ".", "-")),
+		token:  strings.ToUpper(strings.Split(con, ".")[0]),
+		api:    api,
 	}
 }
 
@@ -45,7 +47,7 @@ func (inst *Kucoin) SubscribeQuote(cb func(*exchange.Quote)) error {
 		return err
 	}
 	token, _ := jsonparser.GetString(resp, "token")
-	c, _, err := websocket.DefaultDialer.Dial("wss://ws-api.kucoin.com/endpoint?token="+token, nil)
+	c, _, err := websocket.DefaultDialer.Dial(inst.wsHost+"?token="+token, nil)
 	if err != nil {
 		return err
 	}
@@ -98,7 +100,7 @@ func (inst *Kucoin) SubscribeOrder(cb func(*exchange.Order)) error {
 		return err
 	}
 	token, _ := jsonparser.GetString(resp, "token")
-	c, _, err := websocket.DefaultDialer.Dial("wss://ws-api.kucoin.com/endpoint?token="+token, nil)
+	c, _, err := websocket.DefaultDialer.Dial(inst.wsHost+"?token="+token, nil)
 	if err != nil {
 		return err
 	}
@@ -190,9 +192,13 @@ func (inst *Kucoin) GetOrders() ([]exchange.Order, error) {
 }
 
 func (inst *Kucoin) PlaceOrder(isBuy bool, price float64, amount float64, isMaker bool) (string, error) {
+	side := "sell"
+	if isBuy {
+		side = "buy"
+	}
 	body := fmt.Sprintf(
 		`{"clientOid": "%d", "side": "%s", "symbol": "%s", "price": %f, "size": %f, "postOnly": %t}`,
-		time.Now().UnixNano(), sideMap[isBuy], inst.con, price, amount, isMaker,
+		time.Now().UnixNano(), side, inst.con, price, amount, isMaker,
 	)
 	resp, err := inst.apiCall("POST", "/api/v1/orders", body)
 	if err != nil {
@@ -213,7 +219,7 @@ func (inst *Kucoin) apiCall(method, endpoint, data string) ([]byte, error) {
 	signer.Write([]byte(signStr))
 	signature := base64.StdEncoding.EncodeToString(signer.Sum(nil))
 
-	req, _ := http.NewRequest(method, "https://api.kucoin.com"+endpoint, bytes.NewReader([]byte(data)))
+	req, _ := http.NewRequest(method, inst.host+endpoint, bytes.NewReader([]byte(data)))
 	req.Header.Set("KC-API-SIGN", signature)
 	req.Header.Set("KC-API-TIMESTAMP", ts)
 	req.Header.Set("KC-API-KEY", inst.api.Key)
